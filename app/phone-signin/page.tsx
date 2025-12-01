@@ -30,16 +30,64 @@ export default function PhoneSignInPage() {
   const isValid = isValidJapanPhone(phoneNumber);
 
   const handleSendSMS = async () => {
+    if (!isValid) return;
+
     setLoading(true);
+
     try {
       const appVerifier = (window as any).recaptchaVerifier;
-      const formattedPhone = '+81' + phoneNumber.substring(1);
+      if (!appVerifier) {
+        alert("認証に必要な reCAPTCHA の初期化に失敗しました。再読み込みしてお試しください。");
+        return;
+      }
+
+      // 日本の電話番号を E.164 に整形
+      const cleaned = phoneNumber.replace(/[\s\-()]/g, "");
+      const formattedPhone = "+81" + cleaned.substring(1);
+
       const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+
       (window as any).confirmationResult = confirmationResult;
       router.push('/phone-verification');
-    } catch (error) {
-      console.error('SMS send error:', error);
-      alert('SMSの送信に失敗しました。もう一度お試しください。');
+
+    } catch (err: any) {
+      console.error("SMS send error:", err);
+
+      let message = "SMS の送信に失敗しました。もう一度お試しください。";
+
+      if (err.code) {
+        switch (err.code) {
+          case "auth/invalid-phone-number":
+            message = "電話番号の形式が正しくありません。";
+            break;
+          case "auth/missing-phone-number":
+            message = "電話番号が入力されていません。";
+            break;
+          case "auth/too-many-requests":
+            message = "試行回数が多すぎます。時間を置いて再度お試しください。";
+            break;
+          case "auth/network-request-failed":
+            message = "ネットワークエラーです。接続を確認してください。";
+            break;
+          case "auth/quota-exceeded":
+            message = "SMS 送信の上限に達しました。しばらく待ってから再度お試しください。";
+            break;
+          case "auth/internal-error":
+            message = "Firebase 側で問題が発生しました。少し時間を置いて再度お試しください。";
+            break;
+          default:
+            message = `SMS送信に失敗しました(${err.code})`;
+        }
+      }
+
+      alert(message);
+
+      // reCAPTCHA のリセット（失敗後は時々動かなくなる）
+      try {
+        (window as any).recaptchaVerifier?.render().then((widgetId: any) => {
+          (window as any).grecaptcha?.reset(widgetId);
+        });
+      } catch (_) {}
     } finally {
       setLoading(false);
     }

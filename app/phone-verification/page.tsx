@@ -16,37 +16,91 @@ export default function PhoneVerificationPage() {
   const isValidCode = /^\d{6}$/.test(verificationCode);
 
   const handleVerifyCode = async () => {
+    if (!isValidCode) return;
+
     setLoading(true);
+
     try {
       const confirmationResult = (window as any).confirmationResult;
-      const result = await confirmationResult.confirm(verificationCode);
-      const user = result.user;
+      if (!confirmationResult) {
+        alert("認証セッションが無効です。再度コード送信からやり直してください。");
+        return;
+      }
 
+      // ① Firebase 認証
+      let result;
+      try {
+        result = await confirmationResult.confirm(verificationCode);
+
+      } catch (err: any) {
+        console.error("Firebase verify error:", err);
+
+        let message = "認証に失敗しました。";
+
+        if (err.code) {
+          switch (err.code) {
+            case "auth/invalid-verification-code":
+              message = "認証コードが正しくありません。もう一度ご確認ください。";
+              break;
+            case "auth/code-expired":
+              message = "認証コードの有効期限が切れています。もう一度コードを送信してください。";
+              break;
+            case "auth/invalid-verification-id":
+              message = "認証セッションが無効です。最初からやり直してください。";
+              break;
+            case "auth/too-many-requests":
+              message = "試行回数が多すぎます。しばらく時間を置いて再度お試しください。";
+              break;
+            case "auth/network-request-failed":
+              message = "ネットワークエラーが発生しました。接続を確認してもう一度お試しください。";
+              break;
+            default:
+              message = `予期しないエラーが発生しました（${err.code}）。`;
+              break;
+          }
+        }
+
+        alert(message);
+        return;
+      }
+
+      const user = result.user;
       const uid = user.uid;
-      const number = user.phoneNumber;
       const email = user.email ?? "";
       const screenName = user.displayName ?? "";
+      const number = user.phoneNumber;
 
-      const res = await AuthApi.phoneNumberSignIn({ uid, email, screenName });
-      if (!res || !uid) {
-        console.error("❌ Invalid auth response:", res);
+      // ② backend sign-in
+      try {
+        await AuthApi.phoneNumberSignIn({ uid, email, screenName });
+      } catch (err) {
+        console.error("phoneNumberSignIn error:", err);
+        alert("ログイン処理でエラーが発生しました。もう一度最初からやり直してください。");
         return;
       }
 
-      const appleUid = LocalPreferences.getUid() || '';
-      const appleEmail = LocalPreferences.getEmail() || '';
+      // ③ Apple と電話番号のマージ
+      const appleUid = LocalPreferences.getUid() || "";
+      const appleEmail = LocalPreferences.getEmail() || "";
 
-      const res2 = await AuthApi.mergeApplePhone({ apple_uid: appleUid, apple_email: appleEmail, phone_uid: uid, phone_number: number });
-      if (!res2 || !uid) {
-        console.error("❌ Invalid auth response:", res);
+      try {
+        await AuthApi.mergeApplePhone({
+          apple_uid: appleUid,
+          apple_email: appleEmail,
+          phone_uid: uid,
+          phone_number: number,
+        });
+      } catch (err) {
+        console.error("mergeApplePhone error:", err);
+        alert("アカウント統合に失敗しました。もう一度最初からやり直してください。");
         return;
       }
 
-      console.log('User signed in:', user.uid);
-      router.push('/complete');
-    } catch (error) {
-      console.error('Verification error:', error);
-      alert('認証コードが正しくありません。もう一度お試しください。');
+      router.push("/complete");
+
+    } catch (err) {
+      console.error("Unexpected error:", err);
+      alert("予期しないエラーが発生しました。");
     } finally {
       setLoading(false);
     }

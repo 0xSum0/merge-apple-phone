@@ -14,6 +14,7 @@ export default function AuthPage() {
 
   const handleAppleSignIn = async () => {
     const provider = new OAuthProvider('apple.com');
+
     try {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
@@ -22,19 +23,49 @@ export default function AuthPage() {
       const email = user.email ?? "";
       const screenName = user.displayName ?? "";
 
-      const res = await AuthApi.AppleSignIn({ uid, email, screenName });
-      if (!res || !uid) {
-        console.error("❌ Invalid auth response:", res);
+      // AuthApi
+      try {
+        await AuthApi.AppleSignIn({ uid, email, screenName });
+      } catch (apiError: any) {
+        console.error("Backend AppleSignIn error:", apiError);
+        alert("ログイン処理中に問題が発生しました。時間をおいて再度お試しください。");
         return;
       }
 
+      // Local save
       LocalPreferences.setUid(uid);
       LocalPreferences.setEmail(email);
 
-      console.log(user);
       router.push('/phone-signin');
-    } catch (error) {
-      console.error('Apple sign in error:', error);
+
+    } catch (err: any) {
+      console.error("Apple sign-in error:", err);
+
+      // Firebase OAuth エラー分岐
+      let message = "ログインに失敗しました。もう一度お試しください。";
+
+      switch (err.code) {
+        case "auth/popup-closed-by-user":
+          message = "ログインがキャンセルされました。続行する場合はもう一度お試しください。";
+          break;
+        case "auth/cancelled-popup-request":
+          message = "複数のログインウィンドウが開かれました。もう一度お試しください。";
+          break;
+        case "auth/network-request-failed":
+          message = "ネットワークエラーが発生しました。接続を確認して再度お試しください。";
+          break;
+        case "auth/operation-not-allowed":
+          message = "Appleでのログインが許可されていません。サポートにお問い合わせください。";
+          break;
+        case "auth/account-exists-with-different-credential":
+          message = "このメールアドレスは別のログイン方法で登録されています。";
+          break;
+        default:
+          message = `エラーが発生しました（${err.code ?? 'unknown'}）。`;
+          break;
+      }
+
+      alert(message);
     }
   };
 
@@ -56,7 +87,8 @@ export default function AuthPage() {
               このページは、Appleのみで登録されている方(まだ電話番号を設定していない方)向けのご案内です。
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              ※すでに電話番号を登録済みの方がこの手順を進めても、既存アカウントに支障はありませんのでご安心ください。
+              ※すでに電話番号を登録済みの方はこの手順を進めなくて大丈夫です。アプリで電話番号認証して進めてください。
+              {/* この手順を進めても、既存アカウントに支障はありませんのでご安心ください。 */}
             </p>
           </div>
         </div>
